@@ -56,8 +56,8 @@ local resources = {
     stream_routes   = require("apisix.admin.stream_routes"),
     plugin_metadata = require("apisix.admin.plugin_metadata"),
     plugin_configs  = require("apisix.admin.plugin_config"),
-    consumer_groups  = require("apisix.admin.consumer_group"),
-    secrets             = require("apisix.admin.secrets"),
+    consumer_groups = require("apisix.admin.consumer_group"),
+    secrets         = require("apisix.admin.secrets"),
 }
 
 
@@ -67,6 +67,12 @@ local router
 
 local function check_token(ctx)
     local local_conf = core.config.local_conf()
+
+    -- check if admin_key is required
+    if local_conf.deployment.admin.admin_key_required == false then
+        return true
+    end
+
     local admin_key = core.table.try_read_attr(local_conf, "deployment", "admin", "admin_key")
     if not admin_key then
         return true
@@ -96,6 +102,22 @@ local function check_token(ctx)
     end
 
     return true
+end
+
+-- Set the `apictx` variable and check admin api token, if the check fails, the current
+-- request will be interrupted and an error response will be returned.
+--
+-- NOTE: This is a higher wrapper for `check_token` function.
+local function set_ctx_and_check_token()
+    local api_ctx = {}
+    core.ctx.set_vars_meta(api_ctx)
+    ngx.ctx.api_ctx = api_ctx
+
+    local ok, err = check_token(api_ctx)
+    if not ok then
+        core.log.warn("failed to check token: ", err)
+        core.response.exit(401, { error_msg = "failed to check token" })
+    end
 end
 
 
@@ -136,15 +158,7 @@ end
 
 
 local function run()
-    local api_ctx = {}
-    core.ctx.set_vars_meta(api_ctx)
-    ngx.ctx.api_ctx = api_ctx
-
-    local ok, err = check_token(api_ctx)
-    if not ok then
-        core.log.warn("failed to check token: ", err)
-        core.response.exit(401, {error_msg = "failed to check token"})
-    end
+    set_ctx_and_check_token()
 
     local uri_segs = core.utils.split_uri(ngx.var.uri)
     core.log.info("uri: ", core.json.delay_encode(uri_segs))
@@ -238,31 +252,25 @@ end
 
 
 local function get_plugins_list()
-    local api_ctx = {}
-    core.ctx.set_vars_meta(api_ctx)
-    ngx.ctx.api_ctx = api_ctx
-
-    local ok, err = check_token(api_ctx)
-    if not ok then
-        core.log.warn("failed to check token: ", err)
-        core.response.exit(401, {error_msg = "failed to check token"})
-    end
+    set_ctx_and_check_token()
 
     local plugins = resources.plugins.get_plugins_list()
     core.response.exit(200, plugins)
 end
 
+-- Handle unsupported request methods for the virtual "reload" plugin
+local function unsupported_methods_reload_plugin()
+    set_ctx_and_check_token()
+
+    core.response.exit(405, {
+        error_msg = "please use PUT method to reload the plugins, "
+                    .. get_method() .. " method is not allowed."
+    })
+end
+
 
 local function post_reload_plugins()
-    local api_ctx = {}
-    core.ctx.set_vars_meta(api_ctx)
-    ngx.ctx.api_ctx = api_ctx
-
-    local ok, err = check_token(api_ctx)
-    if not ok then
-        core.log.warn("failed to check token: ", err)
-        core.response.exit(401, {error_msg = "failed to check token"})
-    end
+    set_ctx_and_check_token()
 
     local success, err = events.post(reload_event, get_method(), ngx_time())
     if not success then
@@ -380,6 +388,12 @@ local uri_route = {
         methods = {"PUT"},
         handler = post_reload_plugins,
     },
+    -- Handle methods other than "PUT" on "/plugin/reload" to inform user
+    {
+        paths = reload_event,
+        methods = { "GET", "POST", "DELETE", "PATCH" },
+        handler = unsupported_methods_reload_plugin,
+    },
 }
 
 
@@ -395,6 +409,13 @@ function _M.init_worker()
     events.register(reload_plugins, reload_event, "PUT")
 
     if ngx_worker_id() == 0 then
+        -- check if admin_key is required
+        if local_conf.deployment.admin.admin_key_required == false then
+            core.log.warn("Admin key is bypassed! ",
+                "If you are deploying APISIX in a production environment, ",
+                "please disable `admin_key_required` and set a secure admin key!")
+        end
+
         local ok, err = ngx_timer_at(0, function(premature)
             if premature then
                 return

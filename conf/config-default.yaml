@@ -444,9 +444,9 @@ plugins:                          # plugin list (sorted by priority)
   - opa                            # priority: 2001
   - authz-keycloak                 # priority: 2000
   #- error-log-logger              # priority: 1091
+  - proxy-cache                    # priority: 1085
   - body-transformer               # priority: 1080
   - proxy-mirror                   # priority: 1010
-  - proxy-cache                    # priority: 1009
   - proxy-rewrite                  # priority: 1008
   - workflow                       # priority: 1006
   - api-breaker                    # priority: 1005
@@ -467,6 +467,7 @@ plugins:                          # plugin list (sorted by priority)
   - public-api                     # priority: 501
   - prometheus                     # priority: 500
   - datadog                        # priority: 495
+  - loki-logger                    # priority: 414
   - elasticsearch-logger           # priority: 413
   - echo                           # priority: 412
   - loggly                         # priority: 411
@@ -588,6 +589,10 @@ deployment:
   role_traditional:
     config_provider: etcd
   admin:
+    # Admin API authentication is enabled by default.
+    # Set it false in the production environment will cause a serious security issue.
+    # admin_key_required: true
+
     # Default token when use API to call for Admin API.
     # *NOTE*: Highly recommended to modify this value to protect APISIX's Admin API.
     # Disabling this configuration item means that the Admin API does not

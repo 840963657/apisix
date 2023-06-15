@@ -88,9 +88,9 @@ consumer-restriction
 forward-auth
 opa
 authz-keycloak
+proxy-cache
 body-transformer
 proxy-mirror
-proxy-cache
 proxy-rewrite
 workflow
 api-breaker
@@ -109,6 +109,7 @@ grpc-web
 public-api
 prometheus
 datadog
+loki-logger
 elasticsearch-logger
 echo
 loggly
